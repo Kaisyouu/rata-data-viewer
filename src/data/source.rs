@@ -54,10 +54,74 @@ impl DataSource {
     }
 
     fn load_csv(path: &Path) -> Result<DataFrame> {
-        CsvReadOptions::default()
-            .try_into_reader_with_file_path(Some(path.into()))?
+        use encoding_rs::*;
+        use encoding_rs_io::DecodeReaderBytesBuilder;
+        use std::fs::File;
+        use std::io::Read;
+
+        // Try to detect encoding by reading first few KB
+        let mut file = File::open(path).context("Failed to open CSV file")?;
+        let mut buffer = vec![0u8; 8192];
+        let bytes_read = file.read(&mut buffer).context("Failed to read CSV file")?;
+        buffer.truncate(bytes_read);
+
+        // Detect encoding
+        let encoding = if let Some((enc, _bom_len)) = Encoding::for_bom(&buffer) {
+            enc
+        } else {
+            // No BOM, try to detect
+            // Common encodings: UTF-8, GBK (Chinese), GB18030, ISO-8859-1
+            if std::str::from_utf8(&buffer).is_ok() {
+                UTF_8
+            } else {
+                // Try GBK for Chinese systems
+                let (decoded, _, had_errors) = GBK.decode(&buffer);
+                if !had_errors && !decoded.is_empty() {
+                    GBK
+                } else {
+                    // Try GB18030
+                    let (decoded, _, had_errors) = GB18030.decode(&buffer);
+                    if !had_errors && !decoded.is_empty() {
+                        GB18030
+                    } else {
+                        // Fallback to WINDOWS_1252 (similar to ISO-8859-1)
+                        WINDOWS_1252
+                    }
+                }
+            }
+        };
+
+        // Reopen file and decode with detected encoding
+        let file = File::open(path).context("Failed to open CSV file")?;
+        let transcoded = DecodeReaderBytesBuilder::new()
+            .encoding(Some(encoding))
+            .build(file);
+
+        // Create a temporary file with UTF-8 content
+        let temp_path = std::env::temp_dir().join(format!(
+            "rata_temp_{}.csv",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_micros()
+        ));
+
+        // Write transcoded content to temp file
+        std::io::copy(
+            &mut std::io::BufReader::new(transcoded),
+            &mut std::fs::File::create(&temp_path)?
+        ).context("Failed to transcode CSV file")?;
+
+        // Read with Polars
+        let result = CsvReadOptions::default()
+            .try_into_reader_with_file_path(Some(temp_path.clone()))?
             .finish()
-            .context("Failed to load CSV file")
+            .context("Failed to parse CSV file");
+
+        // Clean up temp file
+        let _ = std::fs::remove_file(temp_path);
+
+        result
     }
 
     fn load_sqlite(_path: &Path) -> Result<DataFrame> {

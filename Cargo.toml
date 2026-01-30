@@ -9,3 +9,5 @@ crossterm = "0.28"
 polars = { version = "0.44", features = ["lazy", "parquet", "csv", "sql"] }
 anyhow = "1.0"
 regex = "1.11"
+encoding_rs = "0.8"
+encoding_rs_io = "0.1"
