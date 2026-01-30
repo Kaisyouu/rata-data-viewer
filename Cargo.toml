@@ -1,0 +1,11 @@
+[package]
+name = "rata-data-viewer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+polars = { version = "0.44", features = ["lazy", "parquet", "csv", "sql"] }
+anyhow = "1.0"
+regex = "1.11"
